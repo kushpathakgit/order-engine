@@ -41,6 +41,13 @@ public class CustomerOrder {
     @Column(nullable = false, updatable = false)
     private LocalDateTime createdAt;
 
+    @Column(
+            name = "idempotency_key",
+            unique = true,
+            length = 100
+    )
+    private String idempotencyKey;
+
     public CustomerOrder() {
     }
 
@@ -103,5 +110,13 @@ public class CustomerOrder {
 
     public void setCreatedAt(LocalDateTime createdAt) {
         this.createdAt = createdAt;
+    }
+
+    public String getIdempotencyKey() {
+        return idempotencyKey;
+    }
+
+    public void setIdempotencyKey(String idempotencyKey) {
+        this.idempotencyKey = idempotencyKey;
     }
 }

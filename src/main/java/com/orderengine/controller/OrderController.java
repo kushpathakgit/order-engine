@@ -24,13 +24,15 @@ public class OrderController {
 
     @PostMapping
     public ResponseEntity<OrderResponseDTO> createOrder(
-            @Valid @RequestBody OrderRequestDTO request
-    ) {
-        OrderResponseDTO response = orderService.createOrder(request);
+            @Valid @RequestBody OrderRequestDTO request,
+            @RequestHeader("Idempotency-Key") String idempotencyKey) {
 
-        return ResponseEntity
-                .status(HttpStatus.CREATED)
-                .body(response);
+        OrderResponseDTO response = orderService.createOrder(
+                request,
+                idempotencyKey
+        );
+
+        return ResponseEntity.status(HttpStatus.CREATED).body(response);
     }
 
     @GetMapping

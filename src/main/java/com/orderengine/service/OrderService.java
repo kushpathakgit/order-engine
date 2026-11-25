@@ -31,7 +31,25 @@ public class OrderService {
     }
 
     @Transactional
-    public OrderResponseDTO createOrder(OrderRequestDTO request) {
+    public OrderResponseDTO createOrder(OrderRequestDTO request, String idempotencyKey) {
+
+        if (idempotencyKey == null || idempotencyKey.isBlank()) {
+            throw new IllegalArgumentException(
+                    "Idempotency-Key header is required"
+            );
+        }
+
+        if (idempotencyKey.length() > 100) {
+            throw new IllegalArgumentException(
+                    "Idempotency-Key cannot exceed 100 characters"
+            );
+        }
+
+        var existingOrder = orderRepository.findByIdempotencyKey(idempotencyKey);
+
+        if (existingOrder.isPresent()) {
+            return OrderResponseDTO.from(existingOrder.get());
+        }
 
         // 1. Find the product and obtain its current price.
         Product product = productRepository.findById(request.productId())
@@ -79,6 +97,8 @@ public class OrderService {
         order.setUnitPrice(unitPrice);
         order.setTotalAmount(totalAmount);
         order.setStatus(OrderStatus.CONFIRMED);
+
+        order.setIdempotencyKey(idempotencyKey);
 
         // 6. Save the order.
         CustomerOrder savedOrder = orderRepository.save(order);

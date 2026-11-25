@@ -19,4 +19,6 @@ public interface OrderRepository extends JpaRepository<CustomerOrder, Long> {
     @Override
     @EntityGraph(attributePaths = "product")
     Optional<CustomerOrder> findById(Long id);
+
+    Optional<CustomerOrder> findByIdempotencyKey(String idempotencyKey);
 }
