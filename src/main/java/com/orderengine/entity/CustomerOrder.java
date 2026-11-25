@@ -6,7 +6,15 @@ import java.math.BigDecimal;
 import java.time.LocalDateTime;
 
 @Entity
-@Table(name = "customer_orders")
+@Table(
+        name = "customer_orders",
+        indexes = {
+                @jakarta.persistence.Index(
+                        name = "idx_orders_product_id",
+                        columnList = "product_id"
+                )
+        }
+)
 public class CustomerOrder {
 
     @Id

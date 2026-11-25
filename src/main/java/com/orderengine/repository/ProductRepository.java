@@ -1,28 +1,18 @@
 package com.orderengine.repository;
 
 import com.orderengine.entity.Product;
-
-import jakarta.persistence.LockModeType;
-
-import org.springframework.data.jpa.repository.Lock;
-import org.springframework.data.jpa.repository.Query;
-import org.springframework.data.repository.query.Param;
-
-import java.util.Optional;
-
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
 
 @Repository
 public interface ProductRepository extends JpaRepository<Product, Long> {
 
-    @Modifying(
-            flushAutomatically = true,
-            clearAutomatically = true
-    )
+    @Modifying(flushAutomatically = true, clearAutomatically = true)
     @Query(value = """
             UPDATE products
             SET available_stock = available_stock - :quantity
@@ -34,9 +24,5 @@ public interface ProductRepository extends JpaRepository<Product, Long> {
             @Param("quantity") Integer quantity
     );
 
-    @Lock(LockModeType.PESSIMISTIC_WRITE)
-    @Query("SELECT p FROM Product p WHERE p.id = :productId")
-    Optional<Product> findByIdForUpdate(
-            @Param("productId") Long productId
-    );
+    Page<Product> findAll(Pageable pageable);
 }

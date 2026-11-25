@@ -4,6 +4,7 @@ package com.orderengine.controller;
 import com.orderengine.dto.ProductRequestDTO;
 import com.orderengine.dto.ProductResponseDTO;
 import com.orderengine.service.ProductService;
+import org.springframework.data.domain.Page;
 
 import jakarta.validation.Valid;
 
@@ -40,10 +41,18 @@ public class ProductController {
 
     // Get All Products
     @GetMapping
-    public ResponseEntity<List<ProductResponseDTO>> getAllProducts() {
+    public ResponseEntity<Page<ProductResponseDTO>> getAllProducts(
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "10") int size) {
+
+        if (page < 0 || size < 1 || size > 100) {
+            throw new IllegalArgumentException(
+                    "Page must be non-negative and size must be between 1 and 100"
+            );
+        }
 
         return ResponseEntity.ok(
-                productService.getAllProducts()
+                productService.getAllProducts(page, size)
         );
     }
 
