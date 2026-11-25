@@ -33,10 +33,6 @@ public class Product {
     @Column(nullable = false, updatable = false)
     private LocalDateTime createdAt;
 
-    @Version
-    @Column(nullable = false)
-    private Long version;
-
     // Default constructor required by JPA
     public Product() {
     }
@@ -53,13 +49,6 @@ public class Product {
         return id;
     }
 
-    public Long getVersion() {
-        return version;
-    }
-
-    public void setVersion(Long version) {
-        this.version = version;
-    }
 
     public void setId(Long id) {
         this.id = id;
