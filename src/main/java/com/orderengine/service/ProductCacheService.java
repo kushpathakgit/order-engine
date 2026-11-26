@@ -8,6 +8,7 @@ import tools.jackson.databind.ObjectMapper;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.dao.DataAccessException;
+import java.util.concurrent.ThreadLocalRandom;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.support.TransactionSynchronization;
@@ -25,8 +26,8 @@ public class ProductCacheService {
     private static final String KEY_PREFIX =
             "order-engine:product:";
 
-    private static final Duration CACHE_TTL =
-            Duration.ofMinutes(10);
+    private static final long BASE_TTL_SECONDS = 600;
+    private static final long TTL_JITTER_SECONDS = 60;
 
     private final StringRedisTemplate redisTemplate;
     private final ObjectMapper objectMapper;
@@ -83,8 +84,15 @@ public class ProductCacheService {
             String json =
                     objectMapper.writeValueAsString(response);
 
+            long jitter = ThreadLocalRandom.current()
+                    .nextLong(-TTL_JITTER_SECONDS, TTL_JITTER_SECONDS + 1);
+
+            Duration ttl = Duration.ofSeconds(
+                    BASE_TTL_SECONDS + jitter
+            );
+
             redisTemplate.opsForValue()
-                    .set(key, json, CACHE_TTL);
+                    .set(key, json, ttl);
 
             log.info("Product cached successfully for id={}", response.id());
 

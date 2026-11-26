@@ -14,6 +14,7 @@ import com.orderengine.repository.ProductRepository;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.Duration;
 import java.util.List;
 import java.util.Optional;
 
@@ -22,14 +23,17 @@ public class ProductService {
 
     private final ProductRepository productRepository;
 
+    private final RedisLockService redisLockService;
+
     private final ProductCacheService productCacheService;
 
     // Constructor Injection
     public ProductService(
-            ProductRepository productRepository,
+            ProductRepository productRepository, RedisLockService redisLockService,
             ProductCacheService productCacheService) {
 
         this.productRepository = productRepository;
+        this.redisLockService = redisLockService;
         this.productCacheService = productCacheService;
     }
     // Create Product
@@ -58,10 +62,10 @@ public class ProductService {
     }
 
     // Get Product By ID
-    @Transactional(readOnly = true)
+
     public ProductResponseDTO getProductById(Long id) {
 
-        // 1. Check Redis first
+        // Step 1: Initial cache check
         Optional<ProductResponseDTO> cachedProduct =
                 productCacheService.get(id);
 
@@ -69,20 +73,73 @@ public class ProductService {
             return cachedProduct.get();
         }
 
-        // 2. Cache miss: fetch from PostgreSQL
+        String lockKey = "order-engine:lock:product:" + id;
+
+        // Step 2: Attempt to acquire the distributed lock
+        String lockToken = redisLockService.tryAcquire(
+                lockKey,
+                Duration.ofSeconds(10)
+        );
+
+        // Step 3: We acquired the lock
+        if (lockToken != null) {
+
+            try {
+                // Another request might have populated the cache
+                // before we acquired the lock.
+                cachedProduct = productCacheService.get(id);
+
+                if (cachedProduct.isPresent()) {
+                    return cachedProduct.get();
+                }
+
+                // Cache is still empty. Fetch from PostgreSQL.
+                Product product = productRepository.findById(id)
+                        .orElseThrow(() -> new ResourceNotFoundException(
+                                "Product not found with id: " + id));
+
+                ProductResponseDTO response =
+                        ProductResponseDTO.from(product);
+
+                // Populate Redis
+                productCacheService.put(response);
+
+                return response;
+
+            } finally {
+                // Release only if this request still owns the lock.
+                redisLockService.release(lockKey, lockToken);
+            }
+        }
+
+        // Step 4: Another request owns the lock.
+        // Wait briefly and repeatedly check Redis.
+        for (int attempt = 0; attempt < 10; attempt++) {
+
+            try {
+                Thread.sleep(50);
+
+            } catch (InterruptedException ex) {
+                Thread.currentThread().interrupt();
+                break;
+            }
+
+            cachedProduct = productCacheService.get(id);
+
+            if (cachedProduct.isPresent()) {
+                return cachedProduct.get();
+            }
+        }
+
+        // Step 5: Lock unavailable or wait limit reached.
+        // Fall back to PostgreSQL rather than blocking indefinitely.
         Product product = productRepository.findById(id)
                 .orElseThrow(() -> new ResourceNotFoundException(
                         "Product not found with id: " + id));
 
-        // 3. Convert entity into DTO
-        ProductResponseDTO response = ProductResponseDTO.from(product);
-
-        // 4. Store response in Redis
-        productCacheService.put(response);
-
-        // 5. Return response
-        return response;
+        return ProductResponseDTO.from(product);
     }
+
 
     // Update Product
     @Transactional
