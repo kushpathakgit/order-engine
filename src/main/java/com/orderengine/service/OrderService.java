@@ -1,12 +1,18 @@
+
 package com.orderengine.service;
 
+import com.orderengine.dto.OrderCreationResult;
 import com.orderengine.dto.OrderRequestDTO;
 import com.orderengine.dto.OrderResponseDTO;
 import com.orderengine.entity.CustomerOrder;
+import com.orderengine.entity.IdempotencyRecord;
 import com.orderengine.entity.OrderStatus;
 import com.orderengine.entity.Product;
+import com.orderengine.exception.IdempotencyKeyReuseException;
 import com.orderengine.exception.InsufficientStockException;
+import com.orderengine.exception.InvalidIdempotencyKeyException;
 import com.orderengine.exception.ResourceNotFoundException;
+import com.orderengine.repository.IdempotencyRepository;
 import com.orderengine.repository.OrderRepository;
 import com.orderengine.repository.ProductRepository;
 
@@ -14,6 +20,10 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
+import java.util.HexFormat;
 import java.util.List;
 
 @Service
@@ -21,51 +31,95 @@ public class OrderService {
 
     private final ProductRepository productRepository;
     private final OrderRepository orderRepository;
+    private final IdempotencyRepository idempotencyRepository;
 
     public OrderService(
             ProductRepository productRepository,
-            OrderRepository orderRepository
-    ) {
+            OrderRepository orderRepository,
+            IdempotencyRepository idempotencyRepository) {
+
         this.productRepository = productRepository;
         this.orderRepository = orderRepository;
+        this.idempotencyRepository = idempotencyRepository;
     }
 
     @Transactional
-    public OrderResponseDTO createOrder(OrderRequestDTO request, String idempotencyKey) {
+    public OrderCreationResult createOrder(
+            OrderRequestDTO request,
+            String idempotencyKey) {
 
+        // 1. Validate the idempotency key
         if (idempotencyKey == null || idempotencyKey.isBlank()) {
-            throw new IllegalArgumentException(
+            throw new InvalidIdempotencyKeyException(
                     "Idempotency-Key header is required"
             );
         }
 
         if (idempotencyKey.length() > 100) {
-            throw new IllegalArgumentException(
+            throw new InvalidIdempotencyKeyException(
                     "Idempotency-Key cannot exceed 100 characters"
             );
         }
 
-        var existingOrder = orderRepository.findByIdempotencyKey(idempotencyKey);
+        // 2. Generate a fingerprint for this request
+        String requestHash = generateRequestHash(request);
 
-        if (existingOrder.isPresent()) {
-            return OrderResponseDTO.from(existingOrder.get());
+        // 3. Try to reserve the key in PostgreSQL
+        int inserted = idempotencyRepository.tryReserveKey(
+                idempotencyKey,
+                requestHash
+        );
+
+        // 4. If the key already exists, handle the retry
+        if (inserted == 0) {
+
+            IdempotencyRecord existingRecord =
+                    idempotencyRepository.findById(idempotencyKey)
+                            .orElseThrow(() ->
+                                    new IllegalStateException(
+                                            "Idempotency record not found after conflict"
+                                    )
+                            );
+
+            // Reject reuse of the same key for a different payload
+            if (!existingRecord.getRequestHash().equals(requestHash)) {
+                throw new IdempotencyKeyReuseException(
+                        "This Idempotency-Key was already used with a different request"
+                );
+            }
+
+            if (existingRecord.getOrderId() == null) {
+                throw new IllegalStateException(
+                        "Completed idempotency record has no order ID"
+                );
+            }
+
+            CustomerOrder existingOrder =
+                    orderRepository.findById(existingRecord.getOrderId())
+                            .orElseThrow(() ->
+                                    new IllegalStateException(
+                                            "Order linked to idempotency key was not found"
+                                    )
+                            );
+
+            return new OrderCreationResult(
+                    OrderResponseDTO.from(existingOrder),
+                    false
+            );
         }
 
-        // 1. Find the product and obtain its current price.
+        // 5. This is a new request. Check the product.
         Product product = productRepository.findById(request.productId())
-                .orElseThrow(() ->
-                        new ResourceNotFoundException(
-                                "Product not found with id: " + request.productId()
-                        )
-                );
+                .orElseThrow(() -> new ResourceNotFoundException(
+                        "Product not found with id: " + request.productId()
+                ));
 
-        // 2. Atomically deduct stock only if sufficient stock exists.
+        // 6. Deduct stock atomically
         int updatedRows = productRepository.deductStockIfAvailable(
                 request.productId(),
                 request.quantity()
         );
 
-        // 3. If no row was updated, distinguish missing product from low stock.
         if (updatedRows == 0) {
 
             boolean productExists =
@@ -82,14 +136,14 @@ public class OrderService {
             );
         }
 
-        // 4. Calculate the order total using the server-side product price.
+        // 7. Calculate order amount
         BigDecimal unitPrice = product.getPrice();
 
         BigDecimal totalAmount = unitPrice.multiply(
                 BigDecimal.valueOf(request.quantity())
         );
 
-        // 5. Create the order.
+        // 8. Create the order
         CustomerOrder order = new CustomerOrder();
 
         order.setProduct(product);
@@ -98,13 +152,47 @@ public class OrderService {
         order.setTotalAmount(totalAmount);
         order.setStatus(OrderStatus.CONFIRMED);
 
-        order.setIdempotencyKey(idempotencyKey);
-
-        // 6. Save the order.
         CustomerOrder savedOrder = orderRepository.save(order);
 
-        // 7. Return the response.
-        return OrderResponseDTO.from(savedOrder);
+        // 9. Link the reserved key to the newly created order
+        IdempotencyRecord record =
+                idempotencyRepository.findById(idempotencyKey)
+                        .orElseThrow(() ->
+                                new IllegalStateException(
+                                        "Reserved idempotency key not found"
+                                )
+                        );
+
+        record.setOrderId(savedOrder.getId());
+
+        idempotencyRepository.save(record);
+
+        // 10. Return the newly created order
+        return new OrderCreationResult(
+                OrderResponseDTO.from(savedOrder),
+                true
+        );
+    }
+
+    private String generateRequestHash(OrderRequestDTO request) {
+
+        String payload = request.productId() + ":" + request.quantity();
+
+        try {
+            MessageDigest digest = MessageDigest.getInstance("SHA-256");
+
+            byte[] hash = digest.digest(
+                    payload.getBytes(StandardCharsets.UTF_8)
+            );
+
+            return HexFormat.of().formatHex(hash);
+
+        } catch (NoSuchAlgorithmException ex) {
+            throw new IllegalStateException(
+                    "SHA-256 algorithm is unavailable",
+                    ex
+            );
+        }
     }
 
     @Transactional(readOnly = true)
@@ -117,12 +205,11 @@ public class OrderService {
 
     @Transactional(readOnly = true)
     public OrderResponseDTO getOrderById(Long id) {
+
         CustomerOrder order = orderRepository.findById(id)
-                .orElseThrow(() ->
-                        new ResourceNotFoundException(
-                                "Order not found with id: " + id
-                        )
-                );
+                .orElseThrow(() -> new ResourceNotFoundException(
+                        "Order not found with id: " + id
+                ));
 
         return OrderResponseDTO.from(order);
     }

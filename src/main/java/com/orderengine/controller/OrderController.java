@@ -1,4 +1,5 @@
 package com.orderengine.controller;
+import com.orderengine.dto.OrderCreationResult;
 
 import com.orderengine.dto.OrderRequestDTO;
 import com.orderengine.dto.OrderResponseDTO;
@@ -27,12 +28,16 @@ public class OrderController {
             @Valid @RequestBody OrderRequestDTO request,
             @RequestHeader("Idempotency-Key") String idempotencyKey) {
 
-        OrderResponseDTO response = orderService.createOrder(
+        OrderCreationResult result = orderService.createOrder(
                 request,
                 idempotencyKey
         );
 
-        return ResponseEntity.status(HttpStatus.CREATED).body(response);
+        HttpStatus status = result.created()
+                ? HttpStatus.CREATED
+                : HttpStatus.OK;
+
+        return ResponseEntity.status(status).body(result.order());
     }
 
     @GetMapping
