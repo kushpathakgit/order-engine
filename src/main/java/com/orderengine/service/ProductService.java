@@ -15,17 +15,23 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.util.List;
+import java.util.Optional;
 
 @Service
 public class ProductService {
 
     private final ProductRepository productRepository;
 
-    // Constructor Injection
-    public ProductService(ProductRepository productRepository) {
-        this.productRepository = productRepository;
-    }
+    private final ProductCacheService productCacheService;
 
+    // Constructor Injection
+    public ProductService(
+            ProductRepository productRepository,
+            ProductCacheService productCacheService) {
+
+        this.productRepository = productRepository;
+        this.productCacheService = productCacheService;
+    }
     // Create Product
     @Transactional
     public ProductResponseDTO createProduct(ProductRequestDTO request) {
@@ -55,14 +61,27 @@ public class ProductService {
     @Transactional(readOnly = true)
     public ProductResponseDTO getProductById(Long id) {
 
-        Product product = productRepository.findById(id)
-                .orElseThrow(() ->
-                        new ResourceNotFoundException(
-                                "Product not found with id: " + id
-                        )
-                );
+        // 1. Check Redis first
+        Optional<ProductResponseDTO> cachedProduct =
+                productCacheService.get(id);
 
-        return ProductResponseDTO.from(product);
+        if (cachedProduct.isPresent()) {
+            return cachedProduct.get();
+        }
+
+        // 2. Cache miss: fetch from PostgreSQL
+        Product product = productRepository.findById(id)
+                .orElseThrow(() -> new ResourceNotFoundException(
+                        "Product not found with id: " + id));
+
+        // 3. Convert entity into DTO
+        ProductResponseDTO response = ProductResponseDTO.from(product);
+
+        // 4. Store response in Redis
+        productCacheService.put(response);
+
+        // 5. Return response
+        return response;
     }
 
     // Update Product
@@ -85,6 +104,8 @@ public class ProductService {
 
         Product updatedProduct = productRepository.save(product);
 
+        productCacheService.evictAfterCommit(id);
+
         return ProductResponseDTO.from(updatedProduct);
     }
 
@@ -98,6 +119,8 @@ public class ProductService {
                                 "Product not found with id: " + id
                         )
                 );
+
+        productCacheService.evictAfterCommit(id);
 
         productRepository.delete(product);
     }
