@@ -224,4 +224,41 @@ public class ReservationService {
 
         return ReservationResponse.from(released);
     }
+
+    public void retryPendingReservation(
+            String reservationId,
+            Long productId,
+            Integer quantity) {
+
+        Long result = inventoryService.reserveStockIdempotently(
+                productId,
+                quantity,
+                reservationId
+        );
+
+        if (result == null) {
+            return;
+        }
+
+        if (result == 1 || result == 2) {
+            persistenceService.markReserved(reservationId);
+            return;
+        }
+
+        if (result == 0) {
+            persistenceService.markFailed(reservationId);
+            return;
+        }
+
+        if (result == -1) {
+            throw new IllegalStateException(
+                    "Redis inventory is missing for product: " + productId);
+        }
+
+        if (result == -2) {
+            throw new IllegalStateException(
+                    "Redis reservation marker does not match the request");
+        }
+    }
+
 }

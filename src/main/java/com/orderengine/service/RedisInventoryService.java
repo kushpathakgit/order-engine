@@ -3,12 +3,54 @@ package com.orderengine.service;
 
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.data.redis.core.script.DefaultRedisScript;
-import org.springframework.stereotype.Service;
-
+import com.orderengine.entity.InventoryReservation;
+import com.orderengine.entity.ReservationStatus;
+import java.util.ArrayList;
 import java.util.List;
+import org.springframework.stereotype.Service;
 
 @Service
 public class RedisInventoryService {
+
+    private static final DefaultRedisScript<Long> RECOVERY_SCRIPT;
+
+    static {
+        RECOVERY_SCRIPT = new DefaultRedisScript<>();
+
+        RECOVERY_SCRIPT.setScriptText("""
+            local stock = tonumber(ARGV[1])
+
+            if not stock or stock < 0 then
+                return -1
+            end
+
+            local reservedTotal = 0
+
+            for i = 2, #ARGV do
+                local quantity = tonumber(ARGV[i])
+
+                if not quantity or quantity <= 0 then
+                    return -2
+                end
+
+                reservedTotal = reservedTotal + quantity
+            end
+
+            if reservedTotal > stock then
+                return -3
+            end
+
+            redis.call('SET', KEYS[1], ARGV[1])
+
+            for i = 2, #KEYS do
+                redis.call('SET', KEYS[i], ARGV[i])
+            end
+
+            return 1
+            """);
+
+        RECOVERY_SCRIPT.setResultType(Long.class);
+    }
 
     private static final DefaultRedisScript<Long> IDEMPOTENT_RESERVE_SCRIPT;
 
@@ -241,4 +283,48 @@ public class RedisInventoryService {
                 String.valueOf(quantity)
         );
     }
+
+    public Long rebuildInventory(
+            Long productId,
+            int postgresStock,
+            List<InventoryReservation> activeReservations) {
+
+        if (productId == null || productId <= 0) {
+            throw new IllegalArgumentException("Invalid product ID");
+        }
+
+        if (postgresStock < 0) {
+            throw new IllegalArgumentException(
+                    "PostgreSQL stock cannot be negative");
+        }
+
+        List<String> keys = new ArrayList<>();
+        List<String> arguments = new ArrayList<>();
+
+        keys.add(getInventoryKey(productId));
+        arguments.add(String.valueOf(postgresStock));
+
+        for (InventoryReservation reservation : activeReservations) {
+
+            if (!reservation.getProductId().equals(productId)
+                    || reservation.getStatus() != ReservationStatus.RESERVED) {
+                throw new IllegalArgumentException(
+                        "Invalid active reservation supplied for recovery");
+            }
+
+            keys.add(
+                    "order-engine:reservation:"
+                            + reservation.getReservationId()
+            );
+
+            arguments.add(String.valueOf(reservation.getQuantity()));
+        }
+
+        return redisTemplate.execute(
+                RECOVERY_SCRIPT,
+                keys,
+                arguments.toArray()
+        );
+    }
+
 }

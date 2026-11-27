@@ -202,4 +202,35 @@ public class ReservationPersistenceService {
             InventoryReservation reservation,
             boolean created
     ) {}
+
+    @Transactional
+    public List<RecoveryTask> claimStuckReservations(
+            ReservationStatus status,
+            Instant cutoff,
+            int batchSize) {
+
+        List<InventoryReservation> reservations =
+                reservationRepository.findStuckReservationsForUpdate(
+                        status.name(),
+                        cutoff,
+                        batchSize
+                );
+
+        return reservations.stream()
+                .map(reservation -> new RecoveryTask(
+                        reservation.getReservationId(),
+                        reservation.getProductId(),
+                        reservation.getQuantity(),
+                        reservation.getStatus()
+                ))
+                .toList();
+    }
+
+    public record RecoveryTask(
+            String reservationId,
+            Long productId,
+            Integer quantity,
+            ReservationStatus status
+    ) {}
+
 }
