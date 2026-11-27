@@ -134,17 +134,25 @@ public class RedisInventoryService {
         return "order-engine:inventory:product:" + productId;
     }
 
-    public void initializeStock(Long productId, int stock) {
+    public boolean initializeStock(Long productId, int stock) {
+
+        if (productId == null || productId <= 0) {
+            throw new IllegalArgumentException(
+                    "Product ID must be positive");
+        }
 
         if (stock < 0) {
             throw new IllegalArgumentException(
                     "Stock cannot be negative");
         }
 
-        redisTemplate.opsForValue().set(
-                getInventoryKey(productId),
-                String.valueOf(stock)
-        );
+        Boolean initialized = redisTemplate.opsForValue()
+                .setIfAbsent(
+                        getInventoryKey(productId),
+                        String.valueOf(stock)
+                );
+
+        return Boolean.TRUE.equals(initialized);
     }
 
     public Long reserveStock(Long productId, int quantity) {

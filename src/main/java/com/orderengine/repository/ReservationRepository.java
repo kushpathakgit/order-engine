@@ -1,6 +1,7 @@
 package com.orderengine.repository;
 
 import com.orderengine.entity.InventoryReservation;
+import com.orderengine.entity.ReservationStatus;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.stereotype.Repository;
 
@@ -80,4 +81,27 @@ public interface    ReservationRepository
             @Param("now") Instant now,
             @Param("batchSize") int batchSize
     );
+
+    @Query("""
+        SELECT COALESCE(SUM(r.quantity), 0)
+        FROM InventoryReservation r
+        WHERE r.productId = :productId
+          AND r.status = :status
+        """)
+    Long sumQuantityByProductIdAndStatus(
+            @Param("productId") Long productId,
+            @Param("status") ReservationStatus status
+    );
+
+    @Query("""
+        SELECT COUNT(r)
+        FROM InventoryReservation r
+        WHERE r.productId = :productId
+          AND r.status IN :statuses
+        """)
+    long countByProductIdAndStatuses(
+            @Param("productId") Long productId,
+            @Param("statuses") List<ReservationStatus> statuses
+    );
+
 }

@@ -22,10 +22,16 @@ public class RedisInventoryTestController {
             @PathVariable Long productId,
             @RequestParam int stock) {
 
-        inventoryService.initializeStock(productId, stock);
+        boolean initialized =
+                inventoryService.initializeStock(productId, stock);
 
-        return ResponseEntity.ok(
-                "Redis inventory initialized with stock: " + stock);
+        if (initialized) {
+            return ResponseEntity.ok(
+                    "Redis inventory initialized with stock: " + stock);
+        }
+
+        return ResponseEntity.status(HttpStatus.CONFLICT)
+                .body("Inventory already exists. Existing stock was not overwritten.");
     }
 
     @PostMapping("/{productId}/reserve")
