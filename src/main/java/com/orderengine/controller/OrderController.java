@@ -23,22 +23,6 @@ public class OrderController {
         this.orderService = orderService;
     }
 
-    @PostMapping
-    public ResponseEntity<OrderResponseDTO> createOrder(
-            @Valid @RequestBody OrderRequestDTO request,
-            @RequestHeader("Idempotency-Key") String idempotencyKey) {
-
-        OrderCreationResult result = orderService.createOrder(
-                request,
-                idempotencyKey
-        );
-
-        HttpStatus status = result.created()
-                ? HttpStatus.CREATED
-                : HttpStatus.OK;
-
-        return ResponseEntity.status(status).body(result.order());
-    }
 
     @GetMapping
     public ResponseEntity<List<OrderResponseDTO>> getAllOrders() {

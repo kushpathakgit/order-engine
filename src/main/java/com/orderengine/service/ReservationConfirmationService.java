@@ -7,6 +7,7 @@ import com.orderengine.entity.OrderStatus;
 import com.orderengine.entity.Product;
 import com.orderengine.entity.ReservationStatus;
 import com.orderengine.exception.InsufficientStockException;
+import com.orderengine.exception.InvalidReservationStateException;
 import com.orderengine.exception.ResourceNotFoundException;
 import com.orderengine.repository.OrderRepository;
 import com.orderengine.repository.ProductRepository;
@@ -54,9 +55,13 @@ public class ReservationConfirmationService {
 
         // 3. Only RESERVED reservations can be confirmed.
         if (reservation.getStatus() != ReservationStatus.RESERVED) {
-            throw new IllegalStateException(
+            throw new InvalidReservationStateException(
                     "Cannot confirm reservation in status: "
                             + reservation.getStatus());
+        }
+        if (!reservation.getExpiresAt().isAfter(java.time.Instant.now())) {
+            throw new InvalidReservationStateException(
+                    "Reservation has expired and cannot be confirmed");
         }
 
         // 4. Lock the product row.
