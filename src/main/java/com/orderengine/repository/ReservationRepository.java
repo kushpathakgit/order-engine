@@ -11,11 +11,12 @@ import org.springframework.data.repository.query.Param;
 
 import org.springframework.data.jpa.repository.Modifying;
 
-
+import java.time.Instant;
+import java.util.List;
 import java.util.Optional;
 
 @Repository
-public interface ReservationRepository
+public interface    ReservationRepository
         extends JpaRepository<InventoryReservation, String> {
 
     Optional<InventoryReservation> findByIdempotencyKey(
@@ -65,4 +66,18 @@ public interface ReservationRepository
         """)
     Optional<InventoryReservation> findByIdForUpdate(
             @Param("reservationId") String reservationId);
+
+    @Query(value = """
+        SELECT *
+        FROM inventory_reservations
+        WHERE status = 'RESERVED'
+          AND expires_at <= :now
+        ORDER BY expires_at ASC
+        LIMIT :batchSize
+        FOR UPDATE SKIP LOCKED
+        """, nativeQuery = true)
+    List<InventoryReservation> findExpiredReservationsForUpdate(
+            @Param("now") Instant now,
+            @Param("batchSize") int batchSize
+    );
 }

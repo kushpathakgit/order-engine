@@ -10,6 +10,9 @@ import com.orderengine.repository.ReservationRepository;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.Instant;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.UUID;
 
 @Service
@@ -103,6 +106,97 @@ public class ReservationPersistenceService {
 
         return reservation;
     }
+
+    @Transactional
+    public InventoryReservation beginRelease(String reservationId) {
+
+        InventoryReservation reservation =
+                reservationRepository.findByIdForUpdate(reservationId)
+                        .orElseThrow(() -> new ResourceNotFoundException(
+                                "Reservation not found: " + reservationId));
+
+        if (reservation.getStatus() == ReservationStatus.RESERVED) {
+            reservation.markReleasing();
+        } else if (reservation.getStatus() != ReservationStatus.RELEASING
+                && reservation.getStatus() != ReservationStatus.RELEASED) {
+            throw new IllegalStateException(
+                    "Cannot release reservation in state: "
+                            + reservation.getStatus());
+        }
+
+        return reservation;
+    }
+
+    @Transactional
+    public InventoryReservation completeRelease(String reservationId) {
+
+        InventoryReservation reservation =
+                reservationRepository.findByIdForUpdate(reservationId)
+                        .orElseThrow(() -> new ResourceNotFoundException(
+                                "Reservation not found: " + reservationId));
+
+        if (reservation.getStatus() == ReservationStatus.RELEASING) {
+            reservation.markReleased();
+        } else if (reservation.getStatus() != ReservationStatus.RELEASED) {
+            throw new IllegalStateException(
+                    "Cannot complete release in state: "
+                            + reservation.getStatus());
+        }
+
+        return reservation;
+    }
+
+    @Transactional
+    public List<ExpiryTask> claimExpiredReservations(int batchSize) {
+
+        if (batchSize <= 0) {
+            throw new IllegalArgumentException(
+                    "Batch size must be greater than zero");
+        }
+
+        List<InventoryReservation> reservations =
+                reservationRepository.findExpiredReservationsForUpdate(
+                        Instant.now(), batchSize);
+
+        List<ExpiryTask> tasks = new ArrayList<>();
+
+        for (InventoryReservation reservation : reservations) {
+            reservation.markExpiring();
+
+            tasks.add(new ExpiryTask(
+                    reservation.getReservationId(),
+                    reservation.getProductId(),
+                    reservation.getQuantity()
+            ));
+        }
+
+        return tasks;
+    }
+
+    @Transactional
+    public InventoryReservation completeExpiry(String reservationId) {
+
+        InventoryReservation reservation =
+                reservationRepository.findByIdForUpdate(reservationId)
+                        .orElseThrow(() -> new ResourceNotFoundException(
+                                "Reservation not found: " + reservationId));
+
+        if (reservation.getStatus() == ReservationStatus.EXPIRING) {
+            reservation.markExpired();
+        } else if (reservation.getStatus() != ReservationStatus.EXPIRED) {
+            throw new IllegalStateException(
+                    "Cannot complete expiry from status: "
+                            + reservation.getStatus());
+        }
+
+        return reservation;
+    }
+
+    public record ExpiryTask(
+            String reservationId,
+            Long productId,
+            Integer quantity
+    ) {}
 
     public record ReservationCreationData(
             InventoryReservation reservation,

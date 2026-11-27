@@ -153,4 +153,75 @@ public class ReservationService {
                     "SHA-256 algorithm is unavailable", ex);
         }
     }
+    public ReservationResponse releaseReservation(String reservationId) {
+
+        // Step 1: Claim the release operation in PostgreSQL.
+        InventoryReservation reservation =
+                persistenceService.beginRelease(reservationId);
+
+        // A repeated release request should return the existing result.
+        if (reservation.getStatus() == ReservationStatus.RELEASED) {
+            return ReservationResponse.from(reservation);
+        }
+
+        // Step 2: Release inventory atomically in Redis.
+        Long result;
+
+        try {
+            result = inventoryService.releaseStock(
+                    reservation.getProductId(),
+                    reservation.getQuantity(),
+                    reservation.getReservationId()
+            );
+        } catch (DataAccessException ex) {
+            // Leave the state as RELEASING.
+            // A retry can safely run the same release operation.
+            throw new ResponseStatusException(
+                    HttpStatus.SERVICE_UNAVAILABLE,
+                    "Could not release inventory; retry the operation",
+                    ex
+            );
+        }
+
+        if (result == null) {
+            throw new ResponseStatusException(
+                    HttpStatus.SERVICE_UNAVAILABLE,
+                    "Inventory service returned no result"
+            );
+        }
+
+        if (result == -1) {
+            throw new ResponseStatusException(
+                    HttpStatus.SERVICE_UNAVAILABLE,
+                    "Reservation marker is missing in Redis; reconciliation required"
+            );
+        }
+
+        if (result == -2) {
+            throw new ResponseStatusException(
+                    HttpStatus.CONFLICT,
+                    "Redis reservation marker does not match the database reservation"
+            );
+        }
+
+        if (result == -3) {
+            throw new ResponseStatusException(
+                    HttpStatus.SERVICE_UNAVAILABLE,
+                    "Redis inventory key is missing"
+            );
+        }
+
+        if (result != 1 && result != 2) {
+            throw new ResponseStatusException(
+                    HttpStatus.INTERNAL_SERVER_ERROR,
+                    "Unexpected inventory release result"
+            );
+        }
+
+        // Step 3: Record successful completion in PostgreSQL.
+        InventoryReservation released =
+                persistenceService.completeRelease(reservationId);
+
+        return ReservationResponse.from(released);
+    }
 }

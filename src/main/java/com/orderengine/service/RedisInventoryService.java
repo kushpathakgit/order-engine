@@ -51,6 +51,51 @@ public class RedisInventoryService {
         IDEMPOTENT_RESERVE_SCRIPT.setResultType(Long.class);
     }
 
+    private static final DefaultRedisScript<Long> RELEASE_SCRIPT;
+
+    static {
+        RELEASE_SCRIPT = new DefaultRedisScript<>();
+
+        RELEASE_SCRIPT.setScriptText("""
+            -- Find the reservation marker
+            local marker = redis.call('GET', KEYS[2])
+
+            if not marker then
+                return -1
+            end
+
+            local quantity = tonumber(ARGV[1])
+            local reservedQuantity = tonumber(marker)
+
+            -- Already released: do not increment stock again
+            if not reservedQuantity then
+                if marker == 'RELEASED:' .. ARGV[1] then
+                    return 2
+                end
+
+                return -2
+            end
+
+            -- Ensure this is the expected reservation
+            if reservedQuantity ~= quantity then
+                return -2
+            end
+
+            -- Inventory key must exist
+            if not redis.call('EXISTS', KEYS[1]) == 0 then
+                return -3
+            end
+
+            -- Return inventory and mark reservation released
+            redis.call('INCRBY', KEYS[1], quantity)
+            redis.call('SET', KEYS[2], 'RELEASED:' .. ARGV[1])
+
+            return 1
+            """);
+
+        RELEASE_SCRIPT.setResultType(Long.class);
+    }
+
     private final StringRedisTemplate redisTemplate;
 
     private static final DefaultRedisScript<Long> RESERVE_SCRIPT;
@@ -153,6 +198,37 @@ public class RedisInventoryService {
 
         return redisTemplate.execute(
                 IDEMPOTENT_RESERVE_SCRIPT,
+                List.of(inventoryKey, reservationKey),
+                String.valueOf(quantity)
+        );
+    }
+    public Long releaseStock(
+            Long productId,
+            int quantity,
+            String reservationId) {
+
+        if (productId == null || productId <= 0) {
+            throw new IllegalArgumentException(
+                    "Product ID must be positive");
+        }
+
+        if (quantity <= 0) {
+            throw new IllegalArgumentException(
+                    "Quantity must be greater than zero");
+        }
+
+        if (reservationId == null || reservationId.isBlank()) {
+            throw new IllegalArgumentException(
+                    "Reservation ID is required");
+        }
+
+        String inventoryKey = getInventoryKey(productId);
+
+        String reservationKey =
+                "order-engine:reservation:" + reservationId;
+
+        return redisTemplate.execute(
+                RELEASE_SCRIPT,
                 List.of(inventoryKey, reservationKey),
                 String.valueOf(quantity)
         );

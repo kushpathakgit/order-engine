@@ -144,15 +144,26 @@ public class InventoryReservation {
         this.status = ReservationStatus.CONFIRMED;
     }
 
-    public void release() {
+    public void markReleasing() {
         requireStatus(ReservationStatus.RESERVED);
+        this.status = ReservationStatus.RELEASING;
+    }
+
+    public void markReleased() {
+        requireStatus(ReservationStatus.RELEASING);
         this.status = ReservationStatus.RELEASED;
     }
 
-    public void expire() {
+    public void markExpiring() {
         requireStatus(ReservationStatus.RESERVED);
+        this.status = ReservationStatus.EXPIRING;
+    }
+
+    public void markExpired() {
+        requireStatus(ReservationStatus.EXPIRING);
         this.status = ReservationStatus.EXPIRED;
     }
+
 
     public void fail() {
         requireStatus(ReservationStatus.PENDING);
