@@ -27,7 +27,7 @@ public class ReservationController {
             @RequestHeader("Idempotency-Key") String idempotencyKey) {
 
         ReservationCreationResult result =
-                reservationService.createPendingReservation(
+                reservationService.createReservation(
                         request, idempotencyKey);
 
         if (result.created()) {

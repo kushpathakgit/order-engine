@@ -67,4 +67,50 @@ public class RedisInventoryTestController {
         return ResponseEntity.ok(
                 "Available Redis stock: " + stock);
     }
+
+    @PostMapping("/{productId}/reserve/{reservationId}")
+    public ResponseEntity<String> reserveIdempotently(
+            @PathVariable Long productId,
+            @PathVariable String reservationId,
+            @RequestParam int quantity) {
+
+        Long result = inventoryService.reserveStockIdempotently(
+                productId,
+                quantity,
+                reservationId
+        );
+
+        if (result == null) {
+            return ResponseEntity.internalServerError()
+                    .body("Redis returned no reservation result");
+        }
+
+        if (result == 1) {
+            return ResponseEntity.ok(
+                    "Inventory reserved successfully");
+        }
+
+        if (result == 2) {
+            return ResponseEntity.ok(
+                    "Reservation already exists. No additional stock deducted.");
+        }
+
+        if (result == 0) {
+            return ResponseEntity.status(HttpStatus.CONFLICT)
+                    .body("Insufficient stock");
+        }
+
+        if (result == -1) {
+            return ResponseEntity.notFound()
+                    .build();
+        }
+
+        if (result == -2) {
+            return ResponseEntity.status(HttpStatus.CONFLICT)
+                    .body("Reservation ID reused with a different quantity");
+        }
+
+        return ResponseEntity.internalServerError()
+                .body("Unexpected Redis reservation result");
+    }
 }
