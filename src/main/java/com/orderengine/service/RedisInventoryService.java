@@ -136,7 +136,7 @@ public class RedisInventoryService {
             end
 
             -- Inventory key must exist
-            if not redis.call('EXISTS', KEYS[1]) == 0 then
+            if redis.call('EXISTS', KEYS[1]) == 0 then
                 return -3
             end
 
