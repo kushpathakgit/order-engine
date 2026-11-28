@@ -5,6 +5,7 @@ import com.orderengine.entity.ReservationStatus;
 import com.orderengine.exception.IdempotencyKeyReuseException;
 import com.orderengine.exception.ResourceNotFoundException;
 import com.orderengine.repository.ProductRepository;
+
 import com.orderengine.repository.ReservationRepository;
 
 import org.springframework.stereotype.Service;
@@ -205,32 +206,66 @@ public class ReservationPersistenceService {
 
     @Transactional
     public List<RecoveryTask> claimStuckReservations(
-            ReservationStatus status,
             Instant cutoff,
-            int batchSize) {
+            int batchSize
+    ) {
+        if (batchSize <= 0) {
+            throw new IllegalArgumentException(
+                    "Batch size must be positive"
+            );
+        }
 
-        List<InventoryReservation> reservations =
-                reservationRepository.findStuckReservationsForUpdate(
-                        status.name(),
-                        cutoff,
-                        batchSize
-                );
+        List<ReservationStatus> recoverableStatuses = List.of(
+                ReservationStatus.PENDING,
+                ReservationStatus.RELEASING,
+                ReservationStatus.EXPIRING
+        );
 
-        return reservations.stream()
-                .map(reservation -> new RecoveryTask(
+        List<RecoveryTask> tasks = new ArrayList<>();
+
+        Instant now = Instant.now();
+        Instant leaseUntil = now.plusSeconds(30);
+
+        for (ReservationStatus status : recoverableStatuses) {
+
+            int remaining = batchSize - tasks.size();
+
+            if (remaining <= 0) {
+                break;
+            }
+
+            List<InventoryReservation> reservations =
+                    reservationRepository.findRecoverableReservationsForUpdate(
+                            status.name(),
+                            cutoff,
+                            remaining
+                    );
+
+            for (InventoryReservation reservation : reservations) {
+
+                UUID token = UUID.randomUUID();
+
+                reservation.claimRecovery(token, leaseUntil);
+
+                tasks.add(new RecoveryTask(
                         reservation.getReservationId(),
                         reservation.getProductId(),
                         reservation.getQuantity(),
-                        reservation.getStatus()
-                ))
-                .toList();
+                        reservation.getStatus(),
+                        token,
+                        reservation.getRecoveryAttempts()
+                ));
+            }
+        }
+
+        return tasks;
     }
 
     public record RecoveryTask(
             String reservationId,
             Long productId,
             Integer quantity,
-            ReservationStatus status
-    ) {}
+            ReservationStatus status,
+            UUID token, int recoveryAttempts) {}
 
 }

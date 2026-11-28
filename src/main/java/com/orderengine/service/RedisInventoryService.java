@@ -12,45 +12,57 @@ import org.springframework.stereotype.Service;
 @Service
 public class RedisInventoryService {
 
-    private static final DefaultRedisScript<Long> RECOVERY_SCRIPT;
 
-    static {
-        RECOVERY_SCRIPT = new DefaultRedisScript<>();
+    private static final DefaultRedisScript<Long> RECOVERY_SCRIPT =
+            new DefaultRedisScript<>(
+                    """
+                    local postgresStock = tonumber(ARGV[1])
+    
+                    if postgresStock == nil or postgresStock < 0 then
+                        return -1
+                    end
+    
+                    if #KEYS ~= #ARGV then
+                        return -3
+                    end
+    
+                    local reservedTotal = 0
+    
+                    for i = 2, #ARGV do
+                        local quantity = tonumber(ARGV[i])
+    
+                        if quantity == nil or quantity <= 0 then
+                            return -1
+                        end
+    
+                        reservedTotal = reservedTotal + quantity
+                    end
+    
+                    if reservedTotal > postgresStock then
+                        return -2
+                    end
+    
+                    local availableStock = postgresStock - reservedTotal
+    
+                    redis.call(
+                        'SET',
+                        KEYS[1],
+                        tostring(availableStock)
+                    )
+    
+                    for i = 2, #KEYS do
+                        redis.call(
+                            'SET',
+                            KEYS[i],
+                            ARGV[i]
+                        )
+                    end
+    
+                    return 1
+                    """,
+                    Long.class
+            );
 
-        RECOVERY_SCRIPT.setScriptText("""
-            local stock = tonumber(ARGV[1])
-
-            if not stock or stock < 0 then
-                return -1
-            end
-
-            local reservedTotal = 0
-
-            for i = 2, #ARGV do
-                local quantity = tonumber(ARGV[i])
-
-                if not quantity or quantity <= 0 then
-                    return -2
-                end
-
-                reservedTotal = reservedTotal + quantity
-            end
-
-            if reservedTotal > stock then
-                return -3
-            end
-
-            redis.call('SET', KEYS[1], ARGV[1])
-
-            for i = 2, #KEYS do
-                redis.call('SET', KEYS[i], ARGV[i])
-            end
-
-            return 1
-            """);
-
-        RECOVERY_SCRIPT.setResultType(Long.class);
-    }
 
     private static final DefaultRedisScript<Long> IDEMPOTENT_RESERVE_SCRIPT;
 

@@ -2,6 +2,7 @@ package com.orderengine.entity;
 
 import jakarta.persistence.*;
 import java.time.Instant;
+import java.util.UUID;
 
 @Entity
 @Table(
@@ -28,6 +29,22 @@ import java.time.Instant;
         }
 )
 public class InventoryReservation {
+
+
+    @Column(name = "recovery_token")
+    private UUID recoveryToken;
+
+    @Column(name = "recovery_locked_until")
+    private Instant recoveryLockedUntil;
+
+    @Column(name = "recovery_attempts", nullable = false)
+    private int recoveryAttempts = 0;
+
+    @Column(name = "next_recovery_at")
+    private Instant nextRecoveryAt;
+
+    @Column(name = "last_recovery_error", columnDefinition = "TEXT")
+    private String lastRecoveryError;
 
     @Id
     @Column(name = "reservation_id", length = 36, nullable = false)
@@ -221,4 +238,62 @@ public class InventoryReservation {
     public Long getVersion() {
         return version;
     }
+
+    public void claimRecovery(UUID token, Instant lockedUntil) {
+        this.recoveryToken = token;
+        this.recoveryLockedUntil = lockedUntil;
+        this.recoveryAttempts++;
+    }
+
+    public void scheduleRecoveryRetry(
+            UUID token,
+            String error,
+            Instant retryAt
+    ) {
+        requireRecoveryToken(token);
+
+        this.lastRecoveryError = error;
+        this.nextRecoveryAt = retryAt;
+
+        this.recoveryToken = null;
+        this.recoveryLockedUntil = null;
+    }
+
+    public void completeRecovery(UUID token) {
+        requireRecoveryToken(token);
+
+        this.recoveryToken = null;
+        this.recoveryLockedUntil = null;
+        this.nextRecoveryAt = null;
+        this.lastRecoveryError = null;
+    }
+
+    public String getLastRecoveryError() {
+        return lastRecoveryError;
+    }
+
+    public Instant getNextRecoveryAt() {
+        return nextRecoveryAt;
+    }
+
+    public int getRecoveryAttempts() {
+        return recoveryAttempts;
+    }
+
+    public Instant getRecoveryLockedUntil() {
+        return recoveryLockedUntil;
+    }
+
+    public UUID getRecoveryToken() {
+        return recoveryToken;
+    }
+
+    public void requireRecoveryToken(UUID token) {
+        if (recoveryToken == null || !recoveryToken.equals(token)) {
+            throw new IllegalStateException(
+                    "Recovery lease is no longer owned by this worker"
+            );
+        }
+    }
+
 }

@@ -160,4 +160,27 @@ public interface    ReservationRepository
             @Param("batchSize") int batchSize
     );
 
+    @Query(value = """
+        SELECT *
+        FROM inventory_reservations
+        WHERE status = :status
+          AND updated_at <= :cutoff
+          AND (
+              recovery_locked_until IS NULL
+              OR recovery_locked_until <= CURRENT_TIMESTAMP
+          )
+          AND (
+              next_recovery_at IS NULL
+              OR next_recovery_at <= CURRENT_TIMESTAMP
+          )
+        ORDER BY updated_at
+        LIMIT :batchSize
+        FOR UPDATE SKIP LOCKED
+        """, nativeQuery = true)
+    List<InventoryReservation> findRecoverableReservationsForUpdate(
+            @Param("status") String status,
+            @Param("cutoff") Instant cutoff,
+            @Param("batchSize") int batchSize
+    );
+
 }
