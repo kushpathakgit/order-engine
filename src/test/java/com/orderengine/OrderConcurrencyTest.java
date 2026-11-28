@@ -1,9 +1,9 @@
 package com.orderengine;
 
 import com.orderengine.dto.OrderRequestDTO;
-import com.orderengine.dto.OrderResponseDTO;
 import com.orderengine.entity.Product;
 import com.orderengine.exception.InsufficientStockException;
+import java.util.UUID;
 import com.orderengine.repository.OrderRepository;
 import com.orderengine.repository.ProductRepository;
 import com.orderengine.service.OrderService;
@@ -92,8 +92,10 @@ class OrderConcurrencyTest {
                         OrderRequestDTO request =
                                 new OrderRequestDTO(productId, 1);
 
-                        OrderResponseDTO response =
-                                orderService.createOrder(request);
+                        orderService.createOrder(
+                                request,
+                                UUID.randomUUID().toString()
+                        );
 
                         return true;
 
