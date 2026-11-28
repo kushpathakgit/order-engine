@@ -239,6 +239,8 @@ public class InventoryReservation {
         return version;
     }
 
+
+
     public void claimRecovery(UUID token, Instant lockedUntil) {
         this.recoveryToken = token;
         this.recoveryLockedUntil = lockedUntil;
@@ -288,12 +290,21 @@ public class InventoryReservation {
         return recoveryToken;
     }
 
+
     public void requireRecoveryToken(UUID token) {
-        if (recoveryToken == null || !recoveryToken.equals(token)) {
+
+        if (recoveryToken == null
+                || !recoveryToken.equals(token)) {
             throw new IllegalStateException(
                     "Recovery lease is no longer owned by this worker"
             );
         }
-    }
 
+        if (recoveryLockedUntil == null
+                || !recoveryLockedUntil.isAfter(Instant.now())) {
+            throw new IllegalStateException(
+                    "Recovery lease has expired"
+            );
+        }
+    }
 }

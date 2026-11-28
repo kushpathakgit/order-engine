@@ -261,11 +261,129 @@ public class ReservationPersistenceService {
         return tasks;
     }
 
-    public record RecoveryTask(
+
+    @Transactional
+    public void completePendingRecovery(
             String reservationId,
-            Long productId,
-            Integer quantity,
-            ReservationStatus status,
-            UUID token, int recoveryAttempts) {}
+            UUID recoveryToken
+    ) {
+        InventoryReservation reservation =
+                reservationRepository.findByIdForUpdate(reservationId)
+                        .orElseThrow(() -> new ResourceNotFoundException(
+                                "Reservation not found: " + reservationId
+                        ));
+
+        reservation.requireRecoveryToken(recoveryToken);
+
+        if (reservation.getStatus() != ReservationStatus.PENDING) {
+            throw new IllegalStateException(
+                    "Reservation is no longer pending"
+            );
+        }
+
+        reservation.markReserved();
+        reservation.completeRecovery(recoveryToken);
+    }
+
+    @Transactional
+    public void completeReleaseRecovery(
+            String reservationId,
+            UUID recoveryToken
+    ) {
+        InventoryReservation reservation =
+                reservationRepository.findByIdForUpdate(reservationId)
+                        .orElseThrow(() -> new ResourceNotFoundException(
+                                "Reservation not found: " + reservationId
+                        ));
+
+        reservation.requireRecoveryToken(recoveryToken);
+
+        if (reservation.getStatus() != ReservationStatus.RELEASING) {
+            throw new IllegalStateException(
+                    "Reservation is no longer releasing"
+            );
+        }
+
+        reservation.markReleased();
+        reservation.completeRecovery(recoveryToken);
+    }
+
+    @Transactional
+    public void completeExpiryRecovery(
+            String reservationId,
+            UUID recoveryToken
+    ) {
+        InventoryReservation reservation =
+                reservationRepository.findByIdForUpdate(reservationId)
+                        .orElseThrow(() -> new ResourceNotFoundException(
+                                "Reservation not found: " + reservationId
+                        ));
+
+        reservation.requireRecoveryToken(recoveryToken);
+
+        if (reservation.getStatus() != ReservationStatus.EXPIRING) {
+            throw new IllegalStateException(
+                    "Reservation is no longer expiring"
+            );
+        }
+
+        reservation.markExpired();
+        reservation.completeRecovery(recoveryToken);
+    }
+
+
+    @Transactional
+    public void scheduleRecoveryFailure(
+            String reservationId,
+            UUID recoveryToken,
+            String error
+    ) {
+        InventoryReservation reservation =
+                reservationRepository.findByIdForUpdate(reservationId)
+                        .orElseThrow(() -> new ResourceNotFoundException(
+                                "Reservation not found: " + reservationId
+                        ));
+
+        // A stale worker must not schedule another worker's retry.
+        reservation.requireRecoveryToken(recoveryToken);
+
+        int attempts = reservation.getRecoveryAttempts();
+
+        long delaySeconds = Math.min(
+                1L << Math.min(attempts, 6),
+                60L
+        );
+
+        Instant retryAt = Instant.now().plusSeconds(delaySeconds);
+
+        reservation.scheduleRecoveryRetry(
+                recoveryToken,
+                error,
+                retryAt
+        );
+    }
+
+    @Transactional
+    public void failPendingRecovery(
+            String reservationId,
+            UUID recoveryToken
+    ) {
+        InventoryReservation reservation =
+                reservationRepository.findByIdForUpdate(reservationId)
+                        .orElseThrow(() -> new ResourceNotFoundException(
+                                "Reservation not found: " + reservationId
+                        ));
+
+        reservation.requireRecoveryToken(recoveryToken);
+
+        if (reservation.getStatus() != ReservationStatus.PENDING) {
+            throw new IllegalStateException(
+                    "Reservation is no longer pending"
+            );
+        }
+
+        reservation.fail();
+        reservation.completeRecovery(recoveryToken);
+    }
 
 }

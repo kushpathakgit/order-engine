@@ -5,7 +5,7 @@ import com.orderengine.entity.ReservationStatus;
 import java.util.UUID;
 
 public record RecoveryTask(
-        UUID reservationId,
+        String reservationId,
         Long productId,
         Integer quantity,
         ReservationStatus status,
